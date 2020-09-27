@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+
+tokenFile=${XDG_CONFIG_HOME:-~/.config}/random-twitch-stream/token.json
+
+createToken() {
+  tokenResponse=$(mktemp)
+
+  if ! code=$(curl -sS 'https://id.twitch.tv/oauth2/token' \
+    --request POST --output "$tokenResponse" --write-out '%{http_code}' \
+    --data-urlencode "client_id=$CLIENT_ID" \
+    --data-urlencode "client_secret=$CLIENT_SECRET" \
+    --data-urlencode "grant_type=client_credentials"); then
+
+    echo "Token curl request failed with exit code $?. Got output: $(cat "$tokenResponse")" >&2
+    exit 1
+  fi
+
+  case "$code" in
+    200)
+      echo "Token curl request successful, got result: $(cat "$tokenResponse")" >&2
+      jq '{ token : .access_token , expires : (now + .expires_in) | floor }' "$tokenResponse" > "$tokenFile"
+      ;;
+    *)
+      echo "Token curl request failed with HTTP code $code, got result: $(cat "$tokenResponse")" >&2
+      exit 1
+      ;;
+  esac
+}
+
+getToken() {
+  if [[ -f "$tokenFile" ]]; then
+    if jq -e '.expires - now < 3600' "$tokenFile" >/dev/null; then
+      expireDate=$(jq -r '.expires | todateiso8601' "$tokenFile")
+      echo "Creating a new token since the existing one expires soon ($expireDate)" >&2
+      createToken
+    fi
+  else
+    echo "Creating new token" >&2
+    createToken
+  fi
+
+  jq -r '.token' "$tokenFile"
+}
+
+token=$(getToken)
+
+headers=$(mktemp)
+
+get() {
+  if grep 'ratelimit-remaining: 0' "$headers" >/dev/null; then
+    echo "API limit reached, waiting for 3 seconds.." >&2
+    sleep 3
+  fi
+  url="https://api.twitch.tv/helix/$1"
+  shift
+  while ! result=$(curl -sSf -H "Client-ID: $CLIENT_ID" -H "Authorization: Bearer $token" -D "$headers" -G "$url" "$@"); do
+    echo "Error response: $result" >&2
+    cat "$headers" >&2
+  done
+  echo "$result"
+}
+
+choosegame() {
+  echo -n "What game [empty for any game]? "
+  read game
+  if [ -n "$game" ] && ! gameid=$(get games --data-urlencode "name=$game" | jq '.data[]?.id' -r -e); then
+    echo "Couldn't get game id for game '$game'" >&2
+    choosegame
+  fi
+}
+
+choosegame
+
+gameidpart=${gameid:+--data-urlencode "game_id=$gameid"}
+
+echo -n "What language (ISO 639-1 code)? "
+read language
+
+languagepart=${language:+--data-urlencode "language=$language"}
+
+echo "Game $game ($gameid), language $language"
+
+streamUsers() {
+  pagepart=${1:+--data-urlencode "after=$1"}
+  echo "Getting streams for $game in $language${1:+ after cursor $1}" >&2
+  result=$(get streams \
+      --data-urlencode "first=100" \
+      $languagepart \
+      $pagepart \
+      $gameidpart)
+  ids=$(jq '.data[].user_id' -r <<< "$result")
+  echo "$ids"
+  count=$(echo "$ids" | wc -l)
+  cursor=$(jq '.pagination.cursor' -r <<< "$result")
+  if [ "$count" -lt 100 ] || [ "$cursor" == null ]; then
+    echo "Finished fetching streams" >&2
+  else
+    streamUsers "$cursor"
+  fi
+}
+
+userToUrl() {
+  result=$(get users --data-urlencode "id=$1")
+  login=$(echo "$result" | jq '.data[].login' -r)
+  echo "https://twitch.tv/$login"
+}
+
+streamUsers | shuf | while read user; do
+  streamlink --twitch-disable-ads -p mpv "$@" "$(userToUrl "$user")" best
+done
