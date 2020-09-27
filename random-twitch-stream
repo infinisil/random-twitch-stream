@@ -32,7 +32,7 @@ getToken() {
   if [[ -f "$tokenFile" ]]; then
     if jq -e '.expires - now < 3600' "$tokenFile" >/dev/null; then
       expireDate=$(jq -r '.expires | todateiso8601' "$tokenFile")
-      echo "Creating a new Twitch API token since the existing one expires soon ($expireDate)" >&2
+      echo "Creating a new Twitch API token since the existing one expired already or will soon ($expireDate)" >&2
       createToken
     fi
   else
