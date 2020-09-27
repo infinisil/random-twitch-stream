@@ -4,7 +4,7 @@ A script to play random twitch streams for a given game and language, unbiased t
 
 ## Usage
 
-To use the Twitch API, you need to create a Twitch Application on https://dev.twitch.tv/console/apps/create and put the client credentials in ${toString ./personal.nix} as such:
+To use the Twitch API, you need to create a Twitch Application on https://dev.twitch.tv/console/apps/create and put the client credentials in `./personal.nix` as such:
 
 ```nix
 {
