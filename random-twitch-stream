@@ -93,29 +93,23 @@ streamUsers() {
       $languagepart \
       $pagepart \
       $gameidpart)
-  if jq -e '.data == []' >/dev/null <<< "$result" && [[ -z "${1+x}" ]]; then
-    echo "No streams found!" >&2
-    return 1
-  fi
-  ids=$(jq '.data[].user_id' -r <<< "$result")
-  count=$(wc -l <<< "$ids")
+
+  count=$(jq '.data | length' <<< "$result")
   total=$(( total + count ))
-  echo "$ids"
-  count=$(echo "$ids" | wc -l)
+
+  # Emit all ids to stdout
+  jq '.data[].user_id' -r <<< "$result"
+
   cursor=$(jq '.pagination.cursor' -r <<< "$result")
-  if [ "$cursor" == null ]; then
+  if [[ "$cursor" == null ]]; then
     echo "Finished fetching $total streams" >&2
   else
     streamUsers "$cursor"
   fi
 }
 
-userToUrl() {
-  result=$(get users --data-urlencode "id=$1")
-  login=$(echo "$result" | jq '.data[].login' -r)
-  echo "https://twitch.tv/$login"
-}
-
 streamUsers | shuf | while read user; do
-  streamlink --twitch-disable-ads -p mpv "$@" "$(userToUrl "$user")" best
+  result=$(get users --data-urlencode "id=$user")
+  login=$(jq '.data[].login' -r <<< "$result")
+  streamlink --twitch-disable-ads -p mpv "$@" "https://twitch.tv/$login" best
 done
