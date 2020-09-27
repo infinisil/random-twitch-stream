@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-tokenFile=${XDG_CONFIG_HOME:-~/.config}/random-twitch-stream/token.json
+tokenFile=${XDG_CONFIG_HOME:-~/.cache}/random-twitch-stream/token.json
 
 createToken() {
   tokenResponse=$(mktemp)
@@ -17,7 +17,8 @@ createToken() {
 
   case "$code" in
     200)
-      echo "Token curl request successful, got result: $(cat "$tokenResponse")" >&2
+      echo "Successfully created a new token, caching it in $tokenFile" >&2
+      mkdir -p "$(dirname "$tokenFile")"
       jq '{ token : .access_token , expires : (now + .expires_in) | floor }' "$tokenResponse" > "$tokenFile"
       ;;
     *)
@@ -31,11 +32,11 @@ getToken() {
   if [[ -f "$tokenFile" ]]; then
     if jq -e '.expires - now < 3600' "$tokenFile" >/dev/null; then
       expireDate=$(jq -r '.expires | todateiso8601' "$tokenFile")
-      echo "Creating a new token since the existing one expires soon ($expireDate)" >&2
+      echo "Creating a new Twitch API token since the existing one expires soon ($expireDate)" >&2
       createToken
     fi
   else
-    echo "Creating new token" >&2
+    echo "Creating new Twitch API token" >&2
     createToken
   fi
 
