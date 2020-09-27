@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 tokenFile=${XDG_CONFIG_HOME:-~/.cache}/random-twitch-stream/token.json
 
@@ -54,10 +55,11 @@ get() {
   fi
   url="https://api.twitch.tv/helix/$1"
   shift
-  while ! result=$(curl -sSf -H "Client-ID: $CLIENT_ID" -H "Authorization: Bearer $token" -D "$headers" -G "$url" "$@"); do
+  if ! result=$(curl -sSf -H "Client-ID: $CLIENT_ID" -H "Authorization: Bearer $token" -D "$headers" -G "$url" "$@"); then
     echo "Error response: $result" >&2
     cat "$headers" >&2
-  done
+    return 1
+  fi
   echo "$result"
 }
 
@@ -79,7 +81,9 @@ read language
 
 languagepart=${language:+--data-urlencode "language=$language"}
 
-echo "Game $game ($gameid), language $language"
+echo "${gameid:+Game $game ($gameid), }language $language"
+
+total=0
 
 streamUsers() {
   pagepart=${1:+--data-urlencode "after=$1"}
@@ -89,12 +93,18 @@ streamUsers() {
       $languagepart \
       $pagepart \
       $gameidpart)
+  if jq -e '.data == []' >/dev/null <<< "$result" && [[ -z "${1+x}" ]]; then
+    echo "No streams found!" >&2
+    return 1
+  fi
   ids=$(jq '.data[].user_id' -r <<< "$result")
+  count=$(wc -l <<< "$ids")
+  total=$(( total + count ))
   echo "$ids"
   count=$(echo "$ids" | wc -l)
   cursor=$(jq '.pagination.cursor' -r <<< "$result")
-  if [ "$count" -lt 100 ] || [ "$cursor" == null ]; then
-    echo "Finished fetching streams" >&2
+  if [ "$cursor" == null ]; then
+    echo "Finished fetching $total streams" >&2
   else
     streamUsers "$cursor"
   fi
